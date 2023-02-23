@@ -57,4 +57,7 @@ profile*
 *clinic*
 *flamegraph*
 
-config.js
+config.json
+
+# built
+built/
