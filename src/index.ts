@@ -17,10 +17,10 @@ import { getAgents } from './http.js';
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
 
-const assets = `${_dirname}/../../server/file/assets/`;
+const assets = `${_dirname}/../../assets/`;
 
 export type MediaProxyOptions = {
-    ['Access-Control-Allow-Origin']?: string;
+    ['Access-Control-Allow-Origin']?: string[];
     ['Access-Control-Allow-Headers']?: string;
     ['Content-Security-Policy']?: string;
     userAgent?: string;
@@ -73,11 +73,11 @@ export default function (fastify: FastifyInstance, options: MediaProxyOptions | 
     const csp = options!['Content-Security-Policy'] ?? `default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'`;
 
     fastify.addHook('onRequest', (request, reply, done) => {
-        if (corsOrigin === '*') {
-            reply.header('Access-Control-Allow-Origin', request.headers.origin ?? '*');
-            reply.header('Vary', 'Origin');
+        if (corsOrigin.includes('*') || !!request.headers.origin && corsOrigin.includes(request.headers.origin)) {
+            reply.header('Access-Control-Allow-Origin', '*');
         } else {
-            reply.header('Access-Control-Allow-Origin', corsOrigin);
+            reply.code(403);
+            done(new Error('Instance not whitelisted'));
         }
         reply.header('Access-Control-Allow-Headers', corsHeader);
         reply.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
