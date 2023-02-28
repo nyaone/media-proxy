@@ -134,6 +134,8 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
         const isConvertibleImage = isMimeImage(file.mime, 'sharp-convertible-image');
         const isAnimationConvertibleImage = isMimeImage(file.mime, 'sharp-animation-convertible-image');
 
+        let image: IImageStreamable | null = null;
+
         if (
             'emoji' in request.query ||
             'avatar' in request.query ||
@@ -141,71 +143,68 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
             'preview' in request.query ||
             'badge' in request.query
         ) {
-            if (!isConvertibleImage) {
-                // 画像でないなら404でお茶を濁す
-                throw new StatusError('Unexpected mime', 404);
-            }
-        }
+            if (isConvertibleImage) {
 
-        let image: IImageStreamable | null = null;
+                if ('emoji' in request.query || 'avatar' in request.query) {
+                    if (!isAnimationConvertibleImage && !('static' in request.query)) {
+                        image = {
+                            data: fs.createReadStream(file.path),
+                            ext: file.ext,
+                            type: file.mime,
+                        };
+                    } else {
+                        const data = sharp(file.path, { animated: !('static' in request.query) })
+                          .resize({
+                              height: 'emoji' in request.query ? 128 : 320,
+                              withoutEnlargement: true,
+                          })
+                          .webp(webpDefault);
 
-        if ('emoji' in request.query || 'avatar' in request.query) {
-            if (!isAnimationConvertibleImage && !('static' in request.query)) {
-                image = {
-                    data: fs.createReadStream(file.path),
-                    ext: file.ext,
-                    type: file.mime,
-                };
-            } else {
-                const data = sharp(file.path, { animated: !('static' in request.query) })
-                        .resize({
-                            height: 'emoji' in request.query ? 128 : 320,
-                            withoutEnlargement: true,
-                        })
-                        .webp(webpDefault);
+                        image = {
+                            data,
+                            ext: 'webp',
+                            type: 'image/webp',
+                        };
+                    }
+                } else if ('static' in request.query) {
+                    image = convertToWebpStream(file.path, 498, 280);
+                } else if ('preview' in request.query) {
+                    image = convertToWebpStream(file.path, 200, 200);
+                } else if ('badge' in request.query) {
+                    const mask = sharp(file.path)
+                      .resize(96, 96, {
+                          fit: 'inside',
+                          withoutEnlargement: false,
+                      })
+                      .greyscale()
+                      .normalise()
+                      .linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
+                      .flatten({ background: '#000' })
+                      .toColorspace('b-w');
 
-                image = {
-                    data,
-                    ext: 'webp',
-                    type: 'image/webp',
-                };
-            }
-        } else if ('static' in request.query) {
-            image = convertToWebpStream(file.path, 498, 280);
-        } else if ('preview' in request.query) {
-            image = convertToWebpStream(file.path, 200, 200);
-        } else if ('badge' in request.query) {
-            const mask = sharp(file.path)
-                .resize(96, 96, {
-                    fit: 'inside',
-                    withoutEnlargement: false,
-                })
-                .greyscale()
-                .normalise()
-                .linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
-                .flatten({ background: '#000' })
-                .toColorspace('b-w');
+                    const stats = await mask.clone().stats();
 
-            const stats = await mask.clone().stats();
+                    if (stats.entropy < 0.1) {
+                        // エントロピーがあまりない場合は404にする
+                        throw new StatusError('Skip to provide badge', 404);
+                    }
 
-            if (stats.entropy < 0.1) {
-                // エントロピーがあまりない場合は404にする
-                throw new StatusError('Skip to provide badge', 404);
-            }
+                    const data = sharp({
+                        create: { width: 96, height: 96, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+                    })
+                      .pipelineColorspace('b-w')
+                      .boolean(await mask.png().toBuffer(), 'eor');
 
-            const data = sharp({
-                create: { width: 96, height: 96, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-            })
-                .pipelineColorspace('b-w')
-                .boolean(await mask.png().toBuffer(), 'eor');
+                    image = {
+                        data: await data.png().toBuffer(),
+                        ext: 'png',
+                        type: 'image/png',
+                    };
+                } else if (file.mime === 'image/svg+xml') {
+                    image = convertToWebpStream(file.path, 2048, 2048);
+                }
 
-            image = {
-                data: await data.png().toBuffer(),
-                ext: 'png',
-                type: 'image/png',
-            };
-        } else if (file.mime === 'image/svg+xml') {
-            image = convertToWebpStream(file.path, 2048, 2048);
+            } // else fallback to origin
         }
 
         if (!image) {
