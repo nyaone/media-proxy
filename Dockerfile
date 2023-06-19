@@ -1,7 +1,8 @@
-FROM node:alpine AS BUILDER
+FROM node:alpine AS base
 
-RUN corepack enable
-RUN corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm
+
+FROM base AS BUILDER
 
 WORKDIR /mp
 
@@ -13,12 +14,9 @@ COPY . ./
 
 RUN pnpm build
 
-FROM node:alpine AS RUNNER
+FROM base AS RUNNER
 
 ENV NODE_ENV=production
-
-RUN corepack enable
-RUN corepack prepare pnpm@latest --activate
 
 WORKDIR /mp
 
