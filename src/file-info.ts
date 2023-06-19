@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { fileTypeFromFile } from 'file-type';
+import type fileType from 'file-type';
 import isSvg from 'is-svg';
 import { promisify } from 'node:util';
 
@@ -39,7 +40,7 @@ export async function detectType(path: string): Promise<{
         }
 
         return {
-            mime: type.mime,
+            mime: fixMime(type.mime),
             ext: type.ext,
         };
     }
@@ -66,8 +67,20 @@ import { FILE_TYPE_BROWSERSAFE } from './const.js';
 
 const dictionary = {
     'safe-file': FILE_TYPE_BROWSERSAFE,
-    'sharp-convertible-image': ['image/jpeg', 'image/png', 'image/gif', 'image/apng', 'image/vnd.mozilla.apng', 'image/webp', 'image/avif', 'image/svg+xml'],
-    'sharp-animation-convertible-image': ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml'],
+    'sharp-convertible-image': ['image/jpeg', 'image/png', 'image/gif', 'image/apng', 'image/vnd.mozilla.apng', 'image/webp', 'image/avif', 'image/svg+xml', 'image/x-icon', 'image/bmp'],
+    'sharp-animation-convertible-image': ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml', 'image/x-icon', 'image/bmp'],
 };
 
 export const isMimeImage = (mime: string, type: keyof typeof dictionary): boolean => dictionary[type].includes(mime);
+
+function fixMime(mime: string | fileType.MimeType): string {
+    // see https://github.com/misskey-dev/misskey/pull/10686
+    if (mime === "audio/x-flac") {
+        return "audio/flac";
+    }
+    if (mime === "audio/vnd.wave") {
+        return "audio/wav";
+    }
+
+    return mime;
+}

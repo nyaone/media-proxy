@@ -6,13 +6,15 @@ import { dirname } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import { createTemp } from './create-temp.js';
 import { FILE_TYPE_BROWSERSAFE } from './const.js';
-import { IImageStreamable, convertToWebpStream, webpDefault } from './image-processor.js';
+import { IImageStreamable, convertToWebpStream, webpDefault, convertSharpToWebpStream } from './image-processor.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginOptions } from 'fastify';
 import { detectType, isMimeImage } from './file-info.js';
 import sharp from 'sharp';
+import { sharpBmp } from 'sharp-read-bmp';
 import { StatusError } from './status-error.js';
 import { DownloadConfig, defaultDownloadConfig, downloadUrl } from './download.js';
 import { getAgents } from './http.js';
+import _contentDisposition from 'content-disposition';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
@@ -160,29 +162,43 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
                           })
                           .webp(webpDefault);
 
-                        image = {
-                            data,
-                            ext: 'webp',
-                            type: 'image/webp',
-                        };
-                    }
-                } else if ('static' in request.query) {
-                    image = convertToWebpStream(file.path, 498, 280);
-                } else if ('preview' in request.query) {
-                    image = convertToWebpStream(file.path, 200, 200);
-                } else if ('badge' in request.query) {
-                    const mask = sharp(file.path)
-                      .resize(96, 96, {
-                          fit: 'inside',
-                          withoutEnlargement: false,
-                      })
-                      .greyscale()
-                      .normalise()
-                      .linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
-                      .flatten({ background: '#000' })
-                      .toColorspace('b-w');
+        if ('emoji' in request.query || 'avatar' in request.query) {
+            if (!isAnimationConvertibleImage && !('static' in request.query)) {
+                image = {
+                    data: fs.createReadStream(file.path),
+                    ext: file.ext,
+                    type: file.mime,
+                };
+            } else {
+                const data = (await sharpBmp(file.path, file.mime, { animated: !('static' in request.query) }))
+                    .resize({
+                        height: 'emoji' in request.query ? 128 : 320,
+                        withoutEnlargement: true,
+                    })
+                    .webp(webpDefault);
 
-                    const stats = await mask.clone().stats();
+                image = {
+                    data,
+                    ext: 'webp',
+                    type: 'image/webp',
+                };
+            }
+        } else if ('static' in request.query) {
+            image = convertSharpToWebpStream(await sharpBmp(file.path, file.mime), 498, 422);
+        } else if ('preview' in request.query) {
+            image = convertSharpToWebpStream(await sharpBmp(file.path, file.mime), 200, 200);
+        } else if ('badge' in request.query) {
+            const mask = (await sharpBmp(file.path, file.mime))
+                .resize(96, 96, {
+                    fit: 'contain',
+                    position: 'centre',
+                    withoutEnlargement: false,
+                })
+                .greyscale()
+                .normalise()
+                .linear(1.75, -(128 * 1.75) + 128) // 1.75x contrast
+                .flatten({ background: '#000' })
+                .toColorspace('b-w');
 
                     if (stats.entropy < 0.1) {
                         // エントロピーがあまりない場合は404にする
@@ -232,6 +248,12 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
 
         reply.header('Content-Type', image.type);
         reply.header('Cache-Control', 'max-age=31536000, immutable');
+        reply.header('Content-Disposition',
+            contentDisposition(
+                'inline',
+                correctFilename(file.filename, image.ext)
+            )
+        );
         return reply.send(image.data);
     } catch (e) {
         if ('cleanup' in file) file.cleanup();
@@ -240,11 +262,11 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
 }
 
 async function downloadAndDetectTypeFromUrl(url: string): Promise<
-    { state: 'remote'; mime: string; ext: string | null; path: string; cleanup: () => void; }
+    { state: 'remote'; mime: string; ext: string | null; path: string; cleanup: () => void; filename: string; }
 > {
     const [path, cleanup] = await createTemp();
     try {
-        await downloadUrl(url, path, config);
+        const { filename } = await downloadUrl(url, path, config);
 
         const { mime, ext } = await detectType(path);
 
@@ -252,9 +274,29 @@ async function downloadAndDetectTypeFromUrl(url: string): Promise<
             state: 'remote',
             mime, ext,
             path, cleanup,
+            filename: correctFilename(filename, ext),
         }
     } catch (e) {
         cleanup();
         throw e;
     }
+}
+
+function correctFilename(filename: string, ext: string | null) {
+    const dotExt = ext ? `.${ext}` : '.unknown';
+    if (filename.endsWith(dotExt)) {
+        return filename;
+    }
+    if (ext === 'jpg' && filename.endsWith('.jpeg')) {
+        return filename;
+    }
+    if (ext === 'tif' && filename.endsWith('.tiff')) {
+        return filename;
+    }
+    return `${filename}${dotExt}`;
+}
+
+function contentDisposition(type: 'inline' | 'attachment', filename: string): string {
+	const fallback = filename.replace(/[^\w.-]/g, '_');
+	return _contentDisposition(filename, { type, fallback });
 }
