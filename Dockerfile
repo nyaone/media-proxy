@@ -1,6 +1,7 @@
 FROM node:alpine AS BUILDER
 
 RUN corepack enable
+RUN corepack prepare pnpm@latest --activate
 
 WORKDIR /mp
 
@@ -17,6 +18,7 @@ FROM node:alpine AS RUNNER
 ENV NODE_ENV=production
 
 RUN corepack enable
+RUN corepack prepare pnpm@latest --activate
 
 WORKDIR /mp
 
