@@ -19,10 +19,10 @@ import _contentDisposition from 'content-disposition';
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
 
-const assets = `${_dirname}/../../assets/`;
+const assets = `${_dirname}/../assets/`;
 
 export type MediaProxyOptions = {
-    ['Access-Control-Allow-Origin']?: string[];
+    ['Access-Control-Allow-Origin']?: string;
     ['Access-Control-Allow-Headers']?: string;
     ['Content-Security-Policy']?: string;
     userAgent?: string;
@@ -75,12 +75,7 @@ export default function (fastify: FastifyInstance, options: MediaProxyOptions | 
     const csp = options!['Content-Security-Policy'] ?? `default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'`;
 
     fastify.addHook('onRequest', (request, reply, done) => {
-        if (corsOrigin.includes('*') || !!request.headers.origin && corsOrigin.includes(request.headers.origin)) {
-            reply.header('Access-Control-Allow-Origin', '*');
-        } else {
-            reply.code(403);
-            done(new Error('Instance not whitelisted'));
-        }
+        reply.header('Access-Control-Allow-Origin', corsOrigin);
         reply.header('Access-Control-Allow-Headers', corsHeader);
         reply.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
         reply.header('Content-Security-Policy', csp);
@@ -136,8 +131,6 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
         const isConvertibleImage = isMimeImage(file.mime, 'sharp-convertible-image');
         const isAnimationConvertibleImage = isMimeImage(file.mime, 'sharp-animation-convertible-image');
 
-        let image: IImageStreamable | null = null;
-
         if (
             'emoji' in request.query ||
             'avatar' in request.query ||
@@ -145,22 +138,13 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
             'preview' in request.query ||
             'badge' in request.query
         ) {
-            if (isConvertibleImage) {
+            if (!isConvertibleImage) {
+                // 画像でないなら404でお茶を濁す
+                throw new StatusError('Unexpected mime', 404);
+            }
+        }
 
-                if ('emoji' in request.query || 'avatar' in request.query) {
-                    if (!isAnimationConvertibleImage && !('static' in request.query)) {
-                        image = {
-                            data: fs.createReadStream(file.path),
-                            ext: file.ext,
-                            type: file.mime,
-                        };
-                    } else {
-                        const data = sharp(file.path, { animated: !('static' in request.query) })
-                          .resize({
-                              height: 'emoji' in request.query ? 128 : 320,
-                              withoutEnlargement: true,
-                          })
-                          .webp(webpDefault);
+        let image: IImageStreamable | null = null;
 
         if ('emoji' in request.query || 'avatar' in request.query) {
             if (!isAnimationConvertibleImage && !('static' in request.query)) {
@@ -200,27 +184,28 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
                 .flatten({ background: '#000' })
                 .toColorspace('b-w');
 
-                    if (stats.entropy < 0.1) {
-                        // エントロピーがあまりない場合は404にする
-                        throw new StatusError('Skip to provide badge', 404);
-                    }
+            const stats = await mask.clone().stats();
 
-                    const data = sharp({
-                        create: { width: 96, height: 96, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-                    })
-                      .pipelineColorspace('b-w')
-                      .boolean(await mask.png().toBuffer(), 'eor');
+            if (stats.entropy < 0.1) {
+                // エントロピーがあまりない場合は404にする
+                throw new StatusError('Skip to provide badge', 404);
+            }
 
-                    image = {
-                        data: await data.png().toBuffer(),
-                        ext: 'png',
-                        type: 'image/png',
-                    };
-                } else if (file.mime === 'image/svg+xml') {
-                    image = convertToWebpStream(file.path, 2048, 2048);
-                }
+            const data = sharp({
+                create: { width: 96, height: 96, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+            })
+                .pipelineColorspace('b-w')
+                .boolean(await mask.png().toBuffer(), 'eor');
 
-            } // else fallback to origin
+            image = {
+                data: await data.png().toBuffer(),
+                ext: 'png',
+                type: 'image/png',
+            };
+        } else if (file.mime === 'image/svg+xml') {
+            image = convertToWebpStream(file.path, 2048, 2048);
+        } else if (!file.mime.startsWith('image/') || !FILE_TYPE_BROWSERSAFE.includes(file.mime)) {
+            throw new StatusError('Rejected type', 403, 'Rejected type');
         }
 
         if (!image) {
