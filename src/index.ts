@@ -15,6 +15,7 @@ import { StatusError } from './status-error.js';
 import { DownloadConfig, defaultDownloadConfig, downloadUrl } from './download.js';
 import { getAgents } from './http.js';
 import _contentDisposition from 'content-disposition';
+import { verifySignedProxyURL } from "@/sign-proxy-url.js";
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
@@ -28,6 +29,7 @@ export type MediaProxyOptions = {
     userAgent?: string;
     allowedPrivateNetworks?: string[];
     maxSize?: number;
+    signatureKey?: string;
 } & ({
     proxy?: string;
 } | {
@@ -54,6 +56,7 @@ export function setMediaProxyConfig(setting?: MediaProxyOptions | null) {
         userAgent: setting.userAgent ?? defaultDownloadConfig.userAgent,
         allowedPrivateNetworks: setting.allowedPrivateNetworks ?? defaultDownloadConfig.allowedPrivateNetworks,
         maxSize: setting.maxSize ?? defaultDownloadConfig.maxSize,
+        signatureKey: setting.signatureKey ?? undefined,
         ...('proxy' in setting ?
             { ...getAgents(setting.proxy), proxy: !!setting.proxy } :
             'httpAgent' in setting ? {
@@ -121,6 +124,12 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
 
     if (!url || typeof url !== 'string') {
         reply.code(400);
+        return;
+    }
+
+    // 检查签名是否符合
+    if (!!config.signatureKey && !verifySignedProxyURL(request.url, config.signatureKey)) {
+        reply.code(401);
         return;
     }
 
