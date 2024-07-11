@@ -15,7 +15,7 @@ import { StatusError } from './status-error.js';
 import { DownloadConfig, defaultDownloadConfig, downloadUrl } from './download.js';
 import { getAgents } from './http.js';
 import _contentDisposition from 'content-disposition';
-import { verifySignedProxyURL } from "@/sign-proxy-url.js";
+import { verifySignedProxyURL } from "./sign-proxy-url.js";
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
