@@ -19,7 +19,6 @@ export type DownloadConfig = {
     httpAgent: http.Agent,
     httpsAgent: https.Agent,
     proxy?: boolean;
-    signatureKey?: string;
 }
 
 export const defaultDownloadConfig = {
