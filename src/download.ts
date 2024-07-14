@@ -19,6 +19,7 @@ export type DownloadConfig = {
     httpAgent: http.Agent,
     httpsAgent: https.Agent,
     proxy?: boolean;
+    allowedReferrers: string[];
 }
 
 export const defaultDownloadConfig = {
@@ -26,6 +27,7 @@ export const defaultDownloadConfig = {
     allowedPrivateNetworks: [],
     maxSize: 262144000,
     proxy: false,
+    allowedReferrers: [],
     ...getAgents()
 }
 

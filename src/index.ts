@@ -28,6 +28,7 @@ export type MediaProxyOptions = {
     userAgent?: string;
     allowedPrivateNetworks?: string[];
     maxSize?: number;
+    allowedReferrers?: string[];
 } & ({
     proxy?: string;
 } | {
@@ -54,6 +55,7 @@ export function setMediaProxyConfig(setting?: MediaProxyOptions | null) {
         userAgent: setting.userAgent ?? defaultDownloadConfig.userAgent,
         allowedPrivateNetworks: setting.allowedPrivateNetworks ?? defaultDownloadConfig.allowedPrivateNetworks,
         maxSize: setting.maxSize ?? defaultDownloadConfig.maxSize,
+        allowedReferrers: setting.allowedReferrers ?? defaultDownloadConfig.allowedReferrers,
         ...('proxy' in setting ?
             { ...getAgents(setting.proxy), proxy: !!setting.proxy } :
             'httpAgent' in setting ? {
@@ -121,6 +123,13 @@ async function proxyHandler(request: FastifyRequest<{ Params: { url: string; }; 
 
     if (!url || typeof url !== 'string') {
         reply.code(400);
+        return;
+    }
+
+    // 仅代理来源于白名单的请求
+    if (config.allowedReferrers.length > 0 && (!request.headers.referer || !config.allowedReferrers.includes(request.headers.referer))) {
+        // 直接 302 跳转
+        reply.redirect(302, url);
         return;
     }
 
